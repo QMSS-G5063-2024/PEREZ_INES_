@@ -1,0 +1,1019 @@
+---
+title: "DATA VIS HW2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#for interactive visualizations
+#library(rbokeh)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(ggthemes)
+#install.packages('maps')
+library(maps)
+#loading appropriate packages
+library(sf)
+library(tigris)
+#options(tigris_use_cache = TRUE)
+#options(tigris_class="sf")
+library(tmap)
+library(tibble)
+library(stringr)
+
+
+```
+
+```{r}
+#Loading and reading our storms dataset
+storms<-read.csv("/Users/inesperezalvarez-pallete/Downloads/storms.csv")
+#summary(storms)
+```
+
+```
+
+## Q1:1. Damage from Storms
+
+###a) State Level Choropleth Maps
+Provide a static state-level choropleth map of the United States visualizing where monetary damage is recorded (by using the sum of the variables DAMAGE_PROPERTY_USD and DAMAGE_CROPS_USD).
+
+```{r Q1A}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(ggthemes)
+#install.packages('maps')
+library(maps)
+#loading appropriate packages
+library(sf)
+library(tigris)
+#options(tigris_use_cache = TRUE)
+#options(tigris_class="sf")
+library(tmap)
+library(tibble)
+library(stringr)
+library(maps)
+# Loading US state map data
+us.states <- map_data("state")
+
+# Plotting the US map
+ggplot() + 
+  geom_polygon(data = us.states, aes(x = long, y = lat, group = group), color = "grey", fill = NA) +
+  coord_map(projection = "azequidistant")
+
+# Preparing the map data to merge with the storms dataset
+# Add State Abbreviations and Centers
+#statenames <- as_tibble(
+ # cbind(state=tolower(state.name), state.abb = state.abb, 
+  #     state.center.x = state.center$x, 
+   #     state.center.y = state.center$y))
+        
+  statenames <- tibble(
+  state = c("texas", "louisiana", "florida", "georgia"), 
+  state.abb = c("TX", "LA", "FL","GA"), 
+  state.center.x = c(-98.8,-92.3,-81.7,-83.3736),
+  state.center.y = c(31.4,30.6,27.9,32.3329)
+)
+
+statenames <- statenames %>% mutate_at(funs(as.numeric), 
+                 vars=c("state.center.x","state.center.y"))
+
+#us.states <- left_join(us.states, statenames, by = c('region','state'))
+#str(us.states)
+
+storms_cost <- storms %>%
+  mutate(region = tolower(STATE)) %>%
+  # Converting state names to lowercase
+  mutate(tot_damage_per_event = DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD) %>%
+  mutate(year=YEAR)
+  
+storms_cost <- storms_cost %>%
+  group_by(region) %>%
+  summarise(tot_damage = sum(tot_damage_per_event, na.rm = TRUE) / 100000)
+
+# Merge with state data
+state.merged <- left_join(storms_cost, us.states, by = 'region')
+  
+# Merge with year data
+#state.merged <- left_join(state.merged, year_data, by = 'region') %>%
+  # summarise(tot_damage = sum(tot_damage))
+
+# Merge county map with total damage
+
+
+#clean data to eliminate any states that present NA abbreviations
+#state.merged <- dplyr::filter(state.merged, state.abb!="NA")
+
+# Preprocessing storm data to compute the total sum of property and crop damage over the time period
+
+cost_map <-ggplot(state.merged, aes(x = long, y = lat, group = group, fill = tot_damage)) +
+  geom_polygon(color = "grey") +
+  coord_map(projection = "mercator") +
+  scale_fill_gradientn(colors = c("lightblue", "red"), name = "Total Damage (hundred-thousand USD)")  +geom_text(data=statenames, inherit.aes = FALSE, 
+            aes(label=state.abb, x=state.center.x, 
+                y=state.center.y), colour="white")+theme_map()+labs(title="Total Damages by Severe Weather 2017-2022")+ theme(legend.position="bottom", panel.border = element_blank())
+ 
+print(cost_map)
+
+  ##CREATING FACET WRAPPING TO SHOW 5 YEAR DIFFERENCE
+  
+  library(ggplot2)
+library(dplyr)
+
+# Calculate total damage per region per year
+
+summary_data <- storms %>%
+  mutate(region = tolower(STATE)) %>%  # Converting state names to lowercase
+  mutate(tot_damage_per_event = DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD) %>%  # Calculate total damage per event
+  group_by(region, year = YEAR) %>%  # Group by region and year
+  summarise(total_damage = sum(tot_damage_per_event, na.rm = TRUE) / 1000000,.groups = 'drop')  %>% 
+  group_by(region)
+  
+  # Summarize total damage
+
+# Merge with state data
+dyn_merged <- left_join(summary_data, us.states, by = 'region', relationship="many-to-many")
+
+# Create base plot, with facets for each year
+base_plot <- ggplot(dyn_merged, aes(x = long, y = lat, group = group, fill = total_damage)) +
+  geom_polygon(color = "grey") +
+  coord_map(projection = "mercator") +
+  scale_fill_gradientn(colors = c("lightblue", "red"), name = "Total Damage (Million USD)") +
+  theme_map() +
+  labs(title = "Total Damages by Severe Weather 2017-2022") +
+  theme(legend.position = "bottom", panel.border = element_blank()) +
+  facet_wrap(~ year)  # Create facets for different years
+
+# Print base plot
+print(base_plot)
+  
+ ##Converting into dynamic map
+
+ # ungroup()
+
+#lets animate our plot
+
+library(ggplot2)
+library(gganimate)
+library(dplyr)
+
+
+```
+
+
+
+  ### Q1B, Creating a county-level choropleth
+Provide a static county-level choropleth map of the United States visualizing where monetary damage is recorded (by using the sum of the variables DAMAGE_PROPERTY_USD and DAMAGE_CROPS_USD).
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(ggthemes)
+#install.packages('maps')
+library(maps)
+#loading appropriate packages
+library(sf)
+library(tigris)
+#options(tigris_use_cache = TRUE)
+#options(tigris_class="sf")
+library(tmap)
+library(tibble)
+library(stringr)
+library(maps)
+# Loading US state map data
+us.states <- map_data("state")
+#devtools::install_github("UrbanInstitute/urbnmapr")
+#uploading county map shapefile from US Census Bureau Data
+#install.packages('rgdal')
+library(ggthemes)
+require(sf)
+library(urbnmapr)
+#us county map
+
+us.counties <- map_data("county")
+uscounties_sf<-get_urbn_map("counties",sf=TRUE)
+
+
+# If it's an old-style CRS, update it to a newer format
+#uscounties_sf <- st_set_crs(uscounties_sf, value = NA)
+
+# Now, mutate the county_name column
+uscounties_sf <- uscounties_sf %>%
+  mutate(county_name = tolower(county_name))
+# devtools::install_github("UrbanInstitute/urbnmapr")
+
+
+#display our map shape files, by county
+# Update the CRS of the uscounties_sf object
+#uscounties_sf <- st_transform(uscounties_sf, #crs = st_crs(4326))
+
+# Plot the spatial object
+ggplot(uscounties_sf) + geom_sf() + theme_map()
+
+
+#preprocessing data to calculate total damage, by county
+county_cost <- storms %>%
+  mutate(
+    tot_damage_per_event = DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD,
+    county_fip = ifelse(nchar(CZ_FIPS) == 1, paste0("00", CZ_FIPS),
+                        ifelse(nchar(CZ_FIPS) == 2, paste0("0", CZ_FIPS), CZ_FIPS)),
+    state_fip = ifelse(nchar(STATE_FIPS) == 1, paste0("0", STATE_FIPS), STATE_FIPS),
+    county_fips = paste0(state_fip, county_fip),
+    county_name = tolower(CZ_NAME)
+  ) %>%
+  group_by(county_fips) %>%
+  summarise(total_damage = sum(tot_damage_per_event, na.rm = TRUE) / 100000) %>%
+  filter(total_damage > 0)
+  
+#uscounties_sf <- get_urbn_map("counties", sf = TRUE)
+
+# Ensure correct CRS format and convert county names to lowercase
+#uscounties_sf <- st_set_crs(uscounties_sf, value = NA) %>%
+ # mutate(county_name = tolower(county_name))
+
+# Preprocessing data to calculate total damage by county
+
+county_cost <- storms %>%
+  mutate(
+    tot_damage_per_event = DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD,
+    county_fip = sprintf("%03d", CZ_FIPS),
+    state_fip = sprintf("%02d", STATE_FIPS),
+    county_fips = paste0(state_fip, county_fip),
+    county_name = tolower(CZ_NAME)
+  ) %>%
+  group_by(county_fips) %>%
+  summarise(total_damage = sum(tot_damage_per_event, na.rm = TRUE) / 100000) %>%
+  filter(total_damage > 0)
+
+# Join county cost data with unique county fips data
+unique_county_fips <- urbnmapr::counties %>%
+  distinct(county_fips, .keep_all = TRUE)
+
+county_merged <- left_join(county_cost, urbnmapr::counties, by =c("county_fips"
+) )%>%
+  filter(!is.na(long))  # Remove rows with NA in 'long' column
+
+# Update the CRS of the uscounties_sf object
+uscounties_sf <- st_set_crs(uscounties_sf, value = NA)
+
+# Now, mutate the county_name column
+uscounties_sf <- uscounties_sf %>%
+  mutate(county_name = tolower(county_name))
+  
+county_merged_poly <- left_join(county_merged, uscounties_sf, by = "county_fips")
+
+# Plot the county map
+ggplot() + 
+  geom_sf(data = uscounties_sf) + 
+  theme_map()
+
+# Create plot for total damages by severe weather events
+county_merged_df <- fortify(county_merged)
+
+theme_set(theme_minimal() +
+              theme(panel.grid.major = element_blank(),
+                    plot.background = element_rect(fill = "#fdfdfd", colour = NA),
+                    axis.title = element_blank(),
+                    text = element_text(family = "Roboto Condensed"),
+                    axis.text = element_blank(),
+                    legend.position = "bottom"))
+
+
+gg<- ggplot(county_merged_df, aes(long, lat, group = group, fill = total_damage)) +
+  geom_polygon(color = "white", size = 0.055) + theme(legend.position="bottom", panel.border = element_blank())+
+  labs(title = "Total Damages by Severe Weather 2017-2022",
+       fill = "Total Damage (Million USD)") +
+              scale_fill_viridis_c(name = "Total Damage (Million USD)",
+                       trans = "log",
+                       breaks = c(10, 100, 1000, 10000, 100000, 1000000),
+                       labels = scales::comma) +theme_bw()+
+  geom_polygon(data = urbnmapr::states, 
+               aes(x = long, y = lat, group = group),
+               fill = NA, color = "white", size = 1)
+print(gg)
+
+#zooming into Texas an dLouisiana
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Assuming 'county_merged_df' contains data for multiple counties
+library(cowplot)
+
+# Filter data for Texas and Louisiana
+
+zoom_counties <- county_merged_df %>%
+  filter(state_name %in% c("Texas", "Louisiana"))
+
+# Create the two additional maps for Texas and Louisiana
+texas_map<- ggplot(zoom_counties %>% filter(state_name == "Texas"), aes(long, lat, group = group, fill = tot_damage))+
+  geom_polygon(color = "white", size = 0.055) + theme(legend.position="bottom", panel.border = element_blank())+
+  labs(title = "Total Damages by Severe Weather 2017-2022",
+       fill = "Total Damage (Million USD)") +
+              scale_fill_viridis_c(name = "Total Damage; Texas (Million USD)",
+                       trans = "log",
+                       breaks = c(10, 100, 1000, 10000, 100000, 1000000),
+                       labels = scales::comma) +theme_bw()+
+  geom_polygon(data = urbnmapr::states, 
+               aes(x = long, y = lat, group = group),
+               fill = NA, color = "white", size = 1)
+print(texas_map)
+
+
+louisiana_map<- ggplot(zoom_counties %>% filter(state_name == "Louisiana"), aes(long, lat, group = group, fill = tot_damage))+
+  geom_polygon(color = "white", size = 0.055) + theme(legend.position="bottom", panel.border = element_blank())+
+  labs(title = "Total Damages by Severe Weather 2017-2022",
+       fill = "Total Damage (Million USD)") +
+              scale_fill_viridis_c(name = "Total Damage ;Louisiana (Million USD)",
+                       trans = "log",
+                       breaks = c(10, 100, 1000, 10000, 100000, 1000000),
+                       labels = scales::comma) +theme_bw()+
+  geom_polygon(data = urbnmapr::states, 
+               aes(x = long, y = lat, group = group),
+               fill = NA, color = "white", size = 1)
+print(louisiana_map)
+
+
+
+# Print the combined plots
+#print(combined_plots)
+#plot the changes over time
+#library(gganimate)
+
+#g <- gg + transition_time(year) +
+ # labs(title = 'Date: {year}')
+
+#animate(p, end_pause=30)
+
+
+```
+
+##this visual isn't super informative, so let's instead plot changes in damage within a 5-year period.
+# First, we Filter data for the desired 5-year period
+
+```{r}
+# Group data by county and calculate total damage for each county
+if (!all(c("DAMAGE_PROPERTY_USD", "DAMAGE_CROPS_USD", "CZ_FIPS", "STATE_FIPS", "CZ_NAME", "YEAR") %in% names(storms))) {
+  stop("Required columns are missing in the 'storms' data frame.")
+}
+
+# Perform data manipulation
+county_cost <- storms %>%
+  mutate(
+    tot_damage_per_event = DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD,
+    county_fip = sprintf("%03d", CZ_FIPS),  # Use sprintf to add leading zeros
+    state_fip = sprintf("%02d", STATE_FIPS),  # Use sprintf to add leading zeros
+    county_fips = paste0(state_fip, county_fip),
+    county_name = tolower(CZ_NAME)
+  )
+
+# Filter and summarize data for 2017
+storms_filtered_2017 <- county_cost %>%
+  filter(YEAR == 2017) %>%
+  group_by(county_fips) %>%
+  summarise(damage_2017 = sum(tot_damage_per_event, na.rm = TRUE))
+
+# Filter and summarize data for 2022
+storms_filtered_2022 <- county_cost %>%
+  filter(YEAR == 2022) %>%
+  group_by(county_fips) %>%
+  summarise(damage_2022 = sum(tot_damage_per_event, na.rm = TRUE))
+
+# Join the datasets to calculate the difference in total damage
+county_damage_diff <- left_join(storms_filtered_2022, storms_filtered_2017, by = "county_fips")
+
+# Calculate damage difference
+county_damage_diff <- county_damage_diff %>%
+  mutate(damage_difference = damage_2022 - damage_2017)  # Correct calculation
+
+# Obtain unique county FIPS codes
+unique_county_fips <- urbnmapr::counties %>%
+  distinct(county_fips, .keep_all = TRUE)
+
+# Merge datasets
+year_diff_merged <- left_join(county_damage_diff, unique_county_fips, by = "county_fips") %>%
+  filter(!is.na(lat))
+
+year_diff_df <- fortify(year_diff_merged)
+
+library(ggplot2)
+
+# Set theme
+theme_set(theme_minimal() +
+              theme(panel.grid.major = element_line(size = 0),
+                    plot.background = element_rect(fill = "#fdfdfd", colour = NA),
+                    axis.title = element_blank(),
+                    text = element_text(family = "Roboto Condensed"),
+                    axis.text = element_blank(),
+                    legend.position = "bottom"))
+
+# Use diverging color scale for positive and negative values
+gg_diff <- ggplot(year_diff_df, aes(long, lat, group = group, fill = damage_difference)) +
+  geom_polygon(color = "white", size = 0.125) +
+  labs(title = "Total Damages by Severe Weather 2017-2022",
+       fill = "Total Damage (Million USD)") +
+  scale_fill_viridis_c(name = "Total Damage (Million USD)",
+                       option = "magma",  # Choose a color palette suitable for diverging data
+                       breaks = c(-1000000, -10000, -1000, -100, 0, 100, 1000, 10000, 100000, 1000000),
+                       labels = scales::comma) +
+  theme_minimal() +  # Applying minimal theme
+  theme(legend.position = "bottom",  # Adjust legend position
+        panel.border = element_blank()) +  # Remove panel border
+  geom_polygon(data = urbnmapr::states, 
+               aes(x = long, y = lat, group = group),
+               fill = NA, color = "white", size = 1)
+
+# Print the plot
+print(gg_diff)
+
+
+```
+
+```
+
+##Q1C, Provide an alternative map, in which you highlight the density of severe events by focusing on the variables of injuries and/or deaths associated with storms.
+
+Discuss briefly which of the two approaches provides a better visual summary of the distribution of the destructive effects of storms.
+
+My choice of dot density map:
+- color code by threshold of density and intensity/ number of deaths/ scale of damage
+- dimensions of interest: deaths p/1000 inhabitants
+- deaths_direct vs deaths_indirect
+-ratio of injuries direct/indirect and ratio of deaths
+- proportion of deaths that were indirect/ direct out of total deaths
+- proportional change of deaths and injuries by county
+- add prism map for population density
+- create facets by season 
+
+##OBSERVATIONS:
+Looking at the output, I prefer the insights that we are able to derive from the bubble map, opposed to the choropleth maps . Clearly, event patterns are not equally distributed within regions or event states, and their clustering of densities d onot follow these geographic boundaries. As such, the bubblemap provides a more truthful and accurate portrayal of severe weather patterns, and provides additional dimensionality through the geometric feature of the bubble diameter.  
+
+```{r}
+#First, lets do some data preprocessing. We'll start by developing metric for the severity of events, according to the proportion of combined injuries/deaths that were deaths. Consequently, the bubbles will be sized according to the total number of weather events in the time frame.
+
+#later , we complete our preprocessing by eliminating any rows with NA values 
+#completing some recoding to segment our disasters by season
+
+#get map and polygon of US
+# Get the world polygon and extract UK
+library(dplyr)
+library(maps)
+library(viridis)
+library(urbnmapr)
+ 
+
+storms_fat <- storms %>%
+  mutate(
+    county_fip = sprintf("%03d", CZ_FIPS),
+    state_fip = sprintf("%02d", STATE_FIPS),
+    county_fips = paste0(state_fip, county_fip)
+  )
+
+#Now, we can add our dot density map visualizations
+
+storms_fat2 <- storms_fat %>%
+  filter(!is.na(DEATHS_DIRECT) & !is.na(INJURIES_DIRECT) & BEGIN_LAT != "NA" & BEGIN_LON != "NA") %>%
+  filter(DEATHS_DIRECT>0)%>%
+  mutate(fatality_rate = DEATHS_DIRECT / (DEATHS_DIRECT + INJURIES_DIRECT),
+         season = case_when(
+           MONTH_NAME %in% c("January", "February", "December") ~ "Winter",
+           MONTH_NAME %in% c("March", "April", "May") ~ "Spring",
+           MONTH_NAME %in% c("June", "July", "August") ~ "Summer",
+           MONTH_NAME %in% c("September", "October", "November") ~ "Fall"
+         ))
+
+#download county-level shp files 
+#county_shapefile <- urbnmapr::counties() %>%
+  #mutate(county_name = tolower(county_name)) %>%
+  #mutate(county_fips = paste0(STATEFP, COUNTYFP)) %>%
+ # distinct(county_fips, .keep_all = TRUE)
+#merge shape files and storm event data
+#fatality_merged <- left_join(county_shapefile, storms_fat2, "county_fips")
+
+#now that we've merged our shapefiles and data, we can begin to implement our dot density map, first by laying out individual points 
+
+
+# Download county-level shapefiles 
+county_shapefile <- counties() %>%
+  mutate(county_name = tolower(NAME),
+         county_fips = paste0(STATEFP, COUNTYFP)) %>%
+  distinct(county_fips, .keep_all = TRUE)
+
+# Merge shapefiles and storm event data
+fatality_merged <- left_join(county_shapefile, storms_fat2, by = "county_fips") %>%
+  arrange(DEATHS_DIRECT)
+
+# Get US county map data
+us.counties <- map_data("county")
+
+# Plot
+library(viridis)
+ggplot() +
+  geom_polygon(data = us.counties, aes(x = long, y = lat, group = group), fill = "grey", alpha = 0.3) +
+  geom_point(data = fatality_merged, aes(x = BEGIN_LON, y = BEGIN_LAT, size = DEATHS_DIRECT, color = season)) +
+  scale_size_continuous(range = c(0, 1)) +
+  scale_color_viridis(discrete = TRUE, name = "Season") +  
+  labs(x = "Longitude", y = "Latitude", title = "Fatality Rate by Season", size = "Deaths") +  
+  theme_void() +
+  theme(legend.position = "right") +
+  coord_map()
+
+#creating a map for death rate by plotting fraction of direct deaths out of deaths+injuries
+
+fatality_merged <- fatality_merged %>%
+  mutate(fatality_fraction = DEATHS_DIRECT / (DEATHS_DIRECT + INJURIES_DIRECT))
+
+# Create breaks for the color scale
+mybreaks <- c(0,10, 100, 1000, 10000)
+
+# Now plot the map
+season_colors <- c("Spring" = "purple", "Summer" = "blue", "Fall" = "grey", "Winter" = "grey")
+
+# Plot the map
+ggplot() +
+  geom_polygon(data = us.counties, aes(x = long, y = lat, group = group), fill = "grey", alpha = 0.3) +
+  geom_point(data = fatality_merged, aes(x = BEGIN_LON, y = BEGIN_LAT, size = fatality_fraction, color = season), alpha = 0.5) +
+  scale_size_continuous(name = "fraction of direct deaths, out of total casualties", trans = "log", range = c(0, 1), breaks = mybreaks) +
+  scale_alpha_continuous(name = "Total Deaths", trans = "log", range = c(0.1, 0.3), breaks = mybreaks) +
+  scale_size_continuous(range = c(0, 3)) +
+  scale_color_manual(name = "Season", values = season_colors) +  # Use custom color scale
+  labs(x = "Longitude", y = "Latitude", title = "Fatality Rate per severe event, by Season", size = "Fraction of Deaths") +
+  theme_void() +
+  theme(
+    legend.position = c(0.1, 0.5),
+    legend.text = element_text(color = "#22211d"),
+    plot.background = element_rect(fill = "#f5f5f2", color = NA), 
+    panel.background = element_rect(fill = "#f5f5f2", color = NA), 
+    legend.background = element_rect(fill = "#f5f5f2", color = NA),
+    plot.title = element_text(size = 16, hjust = 0.1, color = "#4e4d47", margin = margin(b = -0.1, t = 0.4, l = 2, unit = "cm"))
+  ) +
+  coord_map()
+
+
+library(RColorBrewer)
+
+
+```
+
+## NATIONAL BUBBLE MAP,BY SEVERE WEATHER EVENTS
+
+Looking at our output, we clearly see that the summer and spring months give rise to  propensities of both higher frequencies of disaster events, but also more extreme weather events, shown by higher concentrations of fatality rates (number of deaths/(deaths+injuries))  
+
+## SECONDARY BUBBLE MAP: Seeing how fatality rates compare to overall disaster events, including those which are minor and do not result in casualties.
+
+
+```{r}
+storms_fat <- storms %>%
+  mutate(
+    county_fip = sprintf("%03d", CZ_FIPS),
+    state_fip = sprintf("%02d", STATE_FIPS),
+    county_fips = paste0(state_fip, county_fip)
+  )
+
+storms_fat2 <- storms_fat %>%
+  filter(!is.na(DEATHS_DIRECT) & !is.na(INJURIES_DIRECT) & BEGIN_LAT != "NA" & BEGIN_LON != "NA") %>%
+ 
+  mutate(fatality_rate = DEATHS_DIRECT / (DEATHS_DIRECT + INJURIES_DIRECT),
+         season = case_when(
+           MONTH_NAME %in% c("January", "February", "December") ~ "Winter",
+           MONTH_NAME %in% c("March", "April", "May") ~ "Spring",
+           MONTH_NAME %in% c("June", "July", "August") ~ "Summer",
+           MONTH_NAME %in% c("September", "October", "November") ~ "Fall"
+         ))
+
+# Download county-level shapefiles 
+
+#county_shapefile <- counties() %>%
+ # mutate(county_name = tolower(NAME),
+  #       county_fips = paste0(STATEFP, COUNTYFP)) %>%
+  #distinct(county_fips, .keep_all = TRUE)
+
+# Merge shapefiles and storm event data
+fatality_merged <- left_join(county_shapefile, storms_fat2, by = "county_fips") %>%
+  arrange(DEATHS_DIRECT)
+
+library(ggplot2)
+library(sf)
+
+# Set theme
+theme_set(theme_minimal() +
+              theme(panel.grid.major = element_line(size = 0),
+                    plot.background = element_rect(fill = "#fdfdfd", colour = NA),
+                    axis.title = element_blank(),
+                    text = element_text(family = "Roboto Condensed"),
+                    axis.text = element_blank(),
+                    legend.position = "bottom"))
+
+# Create the plot
+# Plot the map
+ggplot() +
+  geom_polygon(data = us.counties, aes(x = long, y = lat, group = group), fill = "grey", alpha = 0.3) +
+  geom_point(data = fatality_merged, aes(x = BEGIN_LON, y = BEGIN_LAT, color = season), alpha = 0.5) +
+  scale_size_continuous(name = "fraction of direct deaths, out of total casualties", trans = "log", range = c(0, 1), breaks = mybreaks) +
+  scale_alpha_continuous(name = "Total Deaths", trans = "log", range = c(0.1, 0.3), breaks = mybreaks) +
+  scale_size_continuous(range = c(0, 3)) +
+  scale_color_manual(name = "Season", values = season_colors) +  # Use custom color scale
+  labs(x = "Longitude", y = "Latitude", title = "Fatality Rate per severe event, by Season", size = "Fraction of Deaths") +
+  theme_void() +
+  theme(
+    legend.position = c(0.1, 0.5),
+    legend.text = element_text(color = "#22211d"),
+    plot.background = element_rect(fill = "#f5f5f2", color = NA), 
+    panel.background = element_rect(fill = "#f5f5f2", color = NA), 
+    legend.background = element_rect(fill = "#f5f5f2", color = NA),
+    plot.title = element_text(size = 16, hjust = 0.1, color = "#4e4d47", margin = margin(b = -0.1, t = 0.4, l = 2, unit = "cm"))
+  ) +
+  coord_map()
+
+
+```
+
+
+
+
+REATE FACETS BY SEASON# Plot with facets by YEAR
+
+```
+
+
+```{r}
+
+```
+
+  ### Q2: Interactive map on Leaflet
+
+    ##Q2A.)Create a leaflet map of the United States showing the location of severe weather events which result in at least one death (hint: use EVENT_TYPE). Ignore locations that fall outside the United States. Provide at least three pieces of information on the incident in a popup.
+
+
+##LAYOUT FOR VISUALIZATION
+
+We have already discovered some interesting trends in disaster event distribution by seasonality. To continue with the flow of our past data exploration, this leaflt visualization will serve the purpose of giving insight onto how the nature of severe weather events in the United States, at the local/regional level, might be geographically determined or influenced.
+
+As such, I have imported a csv. file with the specific coastal classifications of each state, and will include this as a feature in the leaflet visualization.
+
+```{r}
+
+#installing appropriate packages
+library(sf)             # for working with spatial data
+library(dplyr)          # data frame manipulation
+library(leaflet)        # because leaflet :)
+library(htmltools)      # tools to support html workflow
+library(rnaturalearth)  # interface to https://www.naturalearthdata.com/
+library(leaflet.extras) # extending the leaflet.js
+library(dplyr)
+library(leaflet)
+
+# Filter severe weather events with at least one death and within the United States
+# Create a color palette with handmade bins.
+mybins <- seq(0, 1, by=0.05)
+mypalette <- colorBin( palette="YlOrBr", domain=quakes$mag, na.color="transparent", bins=mybins)
+
+#download data fo0r coastline
+list<-read.csv("/Users/inesperezalvarez-pallete/Desktop/coastal-states.csv")
+list<-toupper(list)
+# Reformat and remove forward slashes
+
+coasts <- gsub("\"", "", list)    # Remove quotes
+coasts_df <- data.frame(Coast = coasts)
+library(dplyr)
+
+# Function to extract states and coast types
+extract_states_and_coasts <- function(list) {
+  # Remove leading "C(" and trailing ")"
+  list <- gsub("^C\\(|\\)$", "", list)
+  # Split into separate elements
+  elements <- unlist(strsplit(list, ", "))
+  # Separate into states and coast types
+  states <- elements[seq(1, 50)]
+  coast_types <- elements[seq(51, 100)]
+  # Create data frame
+  df <- data.frame(states = states, coast_types = coast_types, stringsAsFactors = FALSE)
+  return(df)
+}
+
+
+result_df <- extract_states_and_coasts(coasts)
+#result_df$states[1] <- "ALABAMA"
+
+#result_df$coast_types[1] <- "GULF COAST"
+
+# Check column names and types in both data frames
+str(result_df)
+str(storms)
+
+
+result_df$states <- as.character(result_df$states)
+storms$STATE <- as.character(storms$STATE)
+
+# Perform left join
+coasts_merged <- left_join(result_df, storms, by = c("states" = "STATE"))
+
+library(dplyr)
+library(leaflet)
+
+# Define boundaries for the continental United States
+us_bounds <- list(
+  lng1 = -125,  # Western boundary
+  lng2 = -66,   # Eastern boundary
+  lat1 = 24,    # Southern boundary
+  lat2 = 49     # Northern boundary
+)
+
+# Filter out locations outside the United States
+coasts_filtered <- coasts_merged %>%
+  filter(
+    EVENT_TYPE %in% c("Tornado", "Thunderstorm Wind", "Hail") & 
+    DEATHS_DIRECT > 0 & 
+    CZ_TYPE == "C" &
+    BETWEEN(BEGIN_LAT, us_bounds$lat1, us_bounds$lat2) &  # Filter by latitude
+    BETWEEN(BEGIN_LON, us_bounds$lng1, us_bounds$lng2)    # Filter by longitude
+) %>%
+select(BEGIN_LAT, BEGIN_LON, EVENT_TYPE, DEATHS_DIRECT, INJURIES_DIRECT, coast_types, DEATHS_INDIRECT)
+
+# Define event colors
+event_colors <- c(
+  "Tornado" = "red",
+  "Thunderstorm Wind" = "blue",
+  "Hail" = "green"
+)
+
+# Create leaflet map
+leaflet() %>%
+  addTiles() %>%
+  setView(lng = -95.7129, lat = 37.0902, zoom = 4) %>%  # Center the map on the US
+  addCircleMarkers(
+    data = coasts_filtered, 
+    lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+    radius = ~DEATHS_DIRECT,  # Adjust the radius based on the number of deaths
+    color = "red",  # Color code by event type
+    fillColor = ~event_colors[EVENT_TYPE],  # Use custom color palette
+    fillOpacity = 0.7,  # Adjust fill opacity
+    popup = ~paste(
+      "Event Type: ", EVENT_TYPE, "<br>",
+      "Deaths: ", DEATHS_DIRECT, "<br>",
+      "Injuries: ", INJURIES_DIRECT
+    )
+  ) %>%
+  addLegend(position = "bottomright", 
+            colors = unique(event_colors),  # Use unique event type colors for legend
+            labels = names(event_colors),  # Label legend with event types
+            title = "Event Type") %>%
+  addLayersControl(
+    overlayGroups = c("coast_types"),  # Add coast_types as an overlay group
+    options = layersControlOptions(collapsed = FALSE)
+  )
+```
+
+##Q2B.) 
+
+  For this question, we can now integrate clusters according to the state/regional specifications, and see how the distribution of these events are determined by the coastal calssifications of the states. 
+```{r}
+library(leaflet)
+library(leaflet.extras)
+
+# Prepare a palette - manual colors according to EVENT_TYPE column
+palPwr <- leaflet::colorFactor(
+  palette = c(
+    "Thunderstorm Wind" = "red", 
+    "Tornado" = "goldenrod", 
+    "Hail" = "steelblue"
+  ), 
+  domain = coasts_filtered$EVENT_TYPE
+)
+
+# Filter data by locations within the United States
+us_coasts_filtered <- coasts_filtered %>%
+  filter(BEGIN_LAT >= 24.396308 & BEGIN_LAT <= 49.384358 & 
+           BEGIN_LON >= -125.0 & BEGIN_LON <= -66.93457)
+
+# Prepare data frames for different types of coasts
+gulf <- us_coasts_filtered %>% 
+  filter(coast_types == "GULF COAST")
+pacific <- us_coasts_filtered %>% 
+  filter(coast_types == "PACIFIC OCEAN")
+atlantic <- us_coasts_filtered %>% 
+  filter(coast_types == "ATLANTIC OCEAN")
+great_lakes <- us_coasts_filtered %>% 
+  filter(coast_types == "GREAT LAKES COAST")
+
+# Prepare leaflet plot
+lplot <- leaflet(data = us_coasts_filtered) %>% 
+  addProviderTiles("CartoDB.Positron") %>% 
+  addCircleMarkers(data = gulf, 
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = ~palPwr(EVENT_TYPE), # using color palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "Gulf") %>%
+  addCircleMarkers(data = pacific, 
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = ~palPwr(EVENT_TYPE), # using color palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "Pacific") %>%
+  addCircleMarkers(data = atlantic, 
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = ~palPwr(EVENT_TYPE), # using color palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "Atlantic") %>%
+  addCircleMarkers(data = great_lakes, 
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = ~palPwr(EVENT_TYPE), # using color palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "Great Lakes") %>%
+  addLegend(position = "bottomright",
+            values = ~EVENT_TYPE,
+            opacity = 0.7,
+            pal = palPwr, # palette declared previously
+            title = "EVENT TYPE") %>% 
+  leaflet::addLayersControl(overlayGroups = c("Gulf", "Pacific", "Atlantic", "Great Lakes"),
+                            options = layersControlOptions(collapsed = FALSE)) %>% 
+  addResetMapButton()
+
+lplot
+```
+
+
+##Q2C.) Finally, We apply clustering to our leaflet map.We immediately observe how our events have a tendency to aggregate along the Atlantic and Pacific Coastlines, specifically.
+
+
+```{r}
+`
+```{r}
+# prepare a palette - manual colors according to branch column
+palPwr <- leaflet::colorFactor(palette = c("Thunderstorm Wind" = "red", 
+                                           "Tornardo" = "goldenrod", 
+                                           "Hail" = "steelblue"), 
+                               domain = coasts_filtered$EVENT_TYPE)
+
+in_coast <- coasts_filtered %>% 
+  dplyr::filter(coast_types != "NONE") # a shortcut - all except judiciary are in Prague
+
+no_coast <- coasts_filtered %>% 
+  dplyr::filter(coast_types == "NONE" | coast_types=="\nNone") # a shortcut - all except 
+
+
+# data frame of Brno points
+gulf <- coasts_filtered %>% 
+  filter(coast_types == "GULF COAST")
+
+pacific <- coasts_filtered %>% 
+  filter(coast_types == "PACIFIC OCEAN")
+
+atlantic <- coasts_filtered %>% 
+  filter(coast_types == "ATLANTIC OCEAN")
+
+great_lakes <- coasts_filtered %>% 
+  filter(coast_types == "GREAT LAKES COAST")
+
+# first prepare a leaflet plot ...
+library(leaflet.extras)
+
+lplot <- leaflet(data = coasts_filtered) %>% 
+  addProviderTiles("CartoDB.Positron") %>% 
+  addCircleMarkers(data = in_coast, # first group
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = palPwr(in_coast$EVENT_TYPE), # using already created palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "coastal") %>% 
+  addCircleMarkers(data = gulf, # second group
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = palPwr(gulf$EVENT_TYPE), # using already created palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "Gulf") %>% 
+  addCircleMarkers(data = no_coast, # third group
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = palPwr(no_coast$EVENT_TYPE), # using already created palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "No Coast") %>% 
+    addCircleMarkers(data = no_coast, # third group
+                   lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+                   radius = 10,
+                   fillOpacity = 0.7,
+                   stroke = FALSE,
+                   popup = ~paste(
+                     "Event Type: ", EVENT_TYPE, "<br>",
+                     "Deaths: ", DEATHS_DIRECT, "<br>",
+                     "Injuries: ", INJURIES_DIRECT
+                   ),
+                   color = palPwr(no_coast$EVENT_TYPE), # using already created palette
+                   clusterOptions = markerClusterOptions(),
+                   group = "No Coast") %>%
+  addLegend(position = "bottomright",
+            values = ~EVENT_TYPE,
+            opacity = 0.7,
+            pal = palPwr, # palette declared previously
+            title = "EVENT TYPE") %>% 
+  leaflet::addLayersControl(overlayGroups = c("Coastal", "Gulf", "No Coast"),
+                            options = layersControlOptions(collapsed = FALSE)) %>% 
+  addResetMapButton()
+lplot #
+```
+```
+###BONUS QUESTION: ATTEMPT
+
+
+```{r}
+library(dplyr)
+library(geosphere)
+
+# Load the data of severe weather events and the Top 100 largest cities
+# Assuming you have 'severe_weather_events' and 'top_100_cities' datasets available
+
+# Step 1: Find the nearest city for each severe weather event
+nearest_city <- lapply(seq_len(nrow(severe_weather_events)), function(i) {
+  event <- severe_weather_events[i, ]
+  distances <- apply(top_100_cities[, c("Longitude", "Latitude")], 1, function(x) distHaversine(x, event[, c("BEGIN_LON", "BEGIN_LAT")]))
+  nearest_city_index <- which.min(distances)
+  return(top_100_cities[nearest_city_index, ])
+})
+
+nearest_city_df <- do.call(rbind, nearest_city)
+
+
+severe_weather_events$Distance_to_nearest_city <- distHaversine(
+  cbind(severe_weather_events$BEGIN_LON, severe_weather_events$BEGIN_LAT),
+  cbind(nearest_city_df$Longitude, nearest_city_df$Latitude)
+)
+
+scatter_plot <- ggplot(severe_weather_events, aes(x = Population, y = DEATHS_DIRECT)) +
+  geom_point() +
+  labs(x = "City Population", y = "Deaths Directly Caused by Weather Event") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal()
+
+scatter_plot_by_event <- ggplot(severe_weather_events, aes(x = Population, y = DEATHS_DIRECT, color = EVENT_TYPE)) +
+  geom_point() +
+  labs(x = "City Population", y = "Deaths Directly Caused by Weather Event", color = "Event Type") +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal()
+
+
+print(scatter_plot)
+print(scatter_plot_by_event)
+```
+
+
+
+
