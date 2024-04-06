@@ -1,0 +1,728 @@
+---
+title: "Assignment 3: Movie Scripts"
+author: Ines Perez
+date: 2024-03-23
+always_allow_html: yes
+output: 
+  html_document:
+    keep_md: true
+---
+
+Text Mining Movie Scripts
+==================================
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+#install.packages("tm")
+library('tm')
+library('ggplot2')
+library('Matrix')
+library('readr')
+```
+
+## Overview
+
+Explore the cinematic world through the lens of movie scripts, analyzing narrative structures, character prominence, and thematic elements across genres and periods. This assignment involves dissecting movie scripts to uncover patterns and trends, employing data visualization techniques to present your findings.
+
+## Data
+
+You will work with a dataset of approximately 1000 movie scripts and their metadata. This includes the movie's title, release date, a brief overview, and parsed script files distinguishing dialogue, character information, and scene descriptions. The data was scraped with [Aveek Saha's code](https://github.com/Aveek-Saha/Movie-Script-Database
+).
+
+For your assignment, the movie scripts have already been parsed, metadata has been added, and they should be ready to go. The two input files of relevance are:
+
+- `data\tagged.csv.gz` - contains tagged content portions of all movie scripts. Please rely on the `Dialogue` for analysis.
+- `data\metadata.csv` - contains movie metadata from IMDB, including title, release date, genre, IMBD vote average and popularity, etc.
+
+### Tasks for the Assignment
+
+#### 1. Dialogue
+
+### Creating some basic functions for text preprocessing
+```{r}
+
+clean_txt <- function(str_in) {
+  tmp_clean_t <- tolower(gsub("[^A-Za-z']", " ", str_in))
+  return(trimws(tmp_clean_t))
+}
+
+# File reader function
+file_reader <- function(path_in) {
+  tmp <- tolower(readLines(path_in, encoding = "UTF-8"))
+  return(clean_txt(tmp))
+}
+
+# Word count function
+fun_wrd_cnt <- function(pd_in, col_name_in) {
+  library(stringr)
+  fun_word <- list()
+  topics <- unique(pd_in$label)
+  for (topic in topics) {
+    wrd_fun <- pd_in[pd_in$label == topic, ]
+    str_cat <- paste(wrd_fun[[col_name_in]], collapse = " ")
+    fun_word[[topic]] <- table(unlist(str_split(str_cat, "\\s+")))
+  }
+  return(fun_word)
+}
+
+# Remove stop words function
+rem_sw <- function(str_in) {
+  library(tm)
+  sw <- stopwords("en")
+  sent <- removeWords(tolower(str_in), sw)
+  return(sent)
+}
+
+# Stemming function
+stem_fun <- function(str_in) {
+  library(SnowballC)
+  sent <- wordStem(tolower(str_in))
+  return(sent)
+}
+
+# Token count function
+token_count <- function(str_in) {
+  tmp <- unlist(str_split(tolower(str_in), "\\s+"))
+  return(length(tmp))
+}
+
+# Unique token count function
+token_count_unique <- function(str_in) {
+  tmp <- unique(unlist(str_split(tolower(str_in), "\\s+")))
+  return(length(tmp))
+}
+
+# Chi-square feature selection function
+chi_fun <- function(df_in, label_in, k_in, path_out, name_in) {
+  library(C50)
+  dim_data <- data.frame(select(df_in, chi.squared(df_in, label_in, n = k_in)$chosen))
+  write.csv(dim_data, file = paste0(path_out, "/", name_in, ".csv"), row.names = FALSE)
+  return(dim_data)
+}
+
+```
+
+##### a) Most Common Words
+
+#### Reading in our datasets for movie scripts and metadata:
+```{r}
+library(tidyverse)
+library(dplyr)
+df<- read.csv('/Users/inesperezalvarez-pallete/Desktop/tagged.csv')
+meta<-read.csv('/Users/inesperezalvarez-pallete/Desktop/metadata.csv')
+#subset our dataframe to exclusively mention dialogue
+dialogue <- df %>% filter(Tag == 'Dialogue')
+
+grouped<-dialogue %>% 
+  group_by(movie_id) %>% 
+  mutate(Content = paste0(Content, collapse = "")) %>% distinct(Content, movie_id)
+
+#grouped
+```
+
+
+
+
+Analyze the dialogue content of movie scripts. Transform the dialogue into a tidy data frame, breaking down the text into individual words, removing common stop words and other unnecessary elements. As needed, use the cleaning functions introduced in lecture (or write your own in addition) to remove unnecessary words (stop words), syntax, punctuation, numbers, white space, etc. Visualize the 20 most frequently used words in the dialogues to gain insights into the core thematic elements of the scripts.
+
+```{r}
+#subset our dataframe to exclusively mention dialogue
+
+#create a function for spelling correction
+library(hunspell)
+
+# Define a function for spell correction
+spell_correct <- function(text) {
+  dict <- hunspell::hunspell_load("en_US")
+  words <- unlist(strsplit(text, "\\s+"))
+  corrected_words <- sapply(words, function(word) {
+    if (!hunspell_check(dict, word)) {
+      suggestions <- hunspell_suggest(dict, word)
+      if (length(suggestions) > 0) {
+        return(suggestions[[1]])
+      } else {
+        return(word)
+      }
+    } else {
+      return(word)
+    }
+  })
+  corrected_text <- paste(corrected_words, collapse = " ")
+  return(corrected_text)
+}
+
+# Define function for lemmatization
+#lemmatize_tokens <- function(tokens) {
+
+#  model <- udpipe_download_model(language = "english")
+#  udpipe_model <- udpipe_load_model(model$file_model)
+#  lemmatized_tokens <- udpipe_annotate(udpipe_model, tokens)
+ # lemmatized_tokens <- as.data.frame(lemmatized_tokens)
+#  return(lemmatized_tokens)
+#}
+
+library("quanteda")
+library(udpipe)
+library(tm)
+library(tokenizers)
+library(SnowballC)
+library(ggplot2)
+
+# Removing appropriate symbols and extra syntax
+tokens <- tokens(as.character(grouped$Content), what = "word",
+                 remove_numbers = TRUE,
+                 remove_punct = TRUE,
+                 remove_separators = TRUE)
+
+# Lowercasing our tokens and removing stopwords. We do not conduct stemming as this might take away from the context of our data
+tokens <- tokens_remove(tokens, stopwords("en"))
+tokens <- tokens_tolower(tokens)
+tokens <- tokens_remove(tokens, '--')
+#tokens <- lemmatize_tokens(tokens)
+
+#converting our tokens into a tidy document term matrix
+dtm<-dfm(tokens)
+
+#extracting top 20 words
+library("quanteda.textstats")
+top_20 <- textstat_frequency(dtm, n = 20)
+top_20_verbs<-c('know','get', 'like','go','think','going','right','see','come','take')
+
+#visualizing top 20 most frequent words, color coding wether words are verbs or not
+# Determine if each word is a verb
+
+# Add a column to indicate if the word is a verb or not
+top_20$color <- ifelse(top_20$feature %in% top_20_verbs, "pink", "grey")
+
+# Plot the bar graph
+ggplot(top_20, aes(x = reorder(feature, -frequency), y = frequency, fill = color)) +
+  geom_bar(stat = "identity") +
+  scale_fill_identity() +scale_fill_manual(values = c("pink" = "pink", "grey" = "grey"), name = "Word Type",
+                    labels = c("Non-verb", "Verb")) +
+  labs(title = "Top 20 Most Used Words in Movie Scripts",x="Word",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+Creating a bar graph visualization for our most frequently used words:
+
+##### b) Word Cloud
+
+Create word clouds for a selection of movies to visualize the most prevalent themes or phrases. Choose a set of movies, either randomly or based on specific criteria, and use their script dialogues to generate the clouds.
+
+Referring back to our metadata, we randomly select five movie scripts from our complete dataset.
+We use a random number seed generator to pick from a group of movie scripts.
+
+
+```{r}
+#Merging our metadata and our original parsed text data
+library(wordcloud)
+library(RColorBrewer)
+library(tidytable)
+colnames(meta)
+library(tm)
+library(tidytext)
+library("wordcloud")
+
+
+grouped[ , 'token'] = NA
+grouped$token = sapply(tokens, paste, collapse = " ")
+
+random_indices <- sample(1:nrow(grouped), 5)
+cloud_data <- grouped[random_indices, ]
+
+dtm <- TermDocumentMatrix(cloud_data$token) 
+
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+
+df <- data.frame(word = names(words),freq=words)
+ 
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=100, random.order=FALSE, 
+          rot.per=0.3, colors=brewer.pal(6,"Dark2"))
+
+
+for (i in 1:nrow(cloud_data)) {
+  document <- cloud_data[i, ]
+  
+  # Create Document Term Matrix (DTM)
+  dtm <- TermDocumentMatrix(VectorSource(document$token))
+  matrix <- as.matrix(dtm) 
+  
+  # Get word frequencies
+  words <- sort(rowSums(matrix), decreasing=TRUE) 
+  df <- data.frame(word = names(words), freq = words)
+  
+  # Calculate colors based on word frequency
+  color_freq <- df$freq / max(df$freq)  # Normalize frequency to [0,1]
+  colors <- colorRampPalette(c("lightblue", "darkblue"))(length(color_freq))
+  
+  # Create word cloud with color indicating frequency
+  wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words = 100, 
+            random.order = FALSE, rot.per = 0.3, colors = colors)
+}
+
+meta$tagged<-sub(".txt$", "",meta$tagged)
+#merging meta data with script data
+data_joined <- left_join(grouped, meta, by = c("movie_id"="tagged"))
+colnames(data_joined)
+
+#genre_filter<-filter(data_joined$genres)
+ 
+
+
+
+
+```
+
+Word clouds for our randomly selected movie scripts:
+
+
+##### c) Success in Words
+
+Investigate the correlation between specific words or phrases in movie scripts and their success, measured by viewer ratings or popularity. Utilize a pyramid plot to compare the frequency of the top 10-20 words in both successful and unsuccessful movies.
+
+For this section,we will merge our script text data with our meta data 
+
+##Interpretation
+
+Interestingly, many of the words most present in successful movies are also present in a high degree of frequency in unpopular movies
+```{r}
+
+library(tidytable)
+colnames(meta)
+
+meta$tagged<-sub(".txt$", "",meta$tagged)
+#merging meta data with script data
+data_joined <- left_join(grouped, meta, by = c("movie_id"="tagged"))
+
+
+
+unpop100 <- Corpus(VectorSource(data_joined[1:100,]$token))
+dtm <- TermDocumentMatrix(unpop100)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+
+pop100 <- Corpus(VectorSource(tail(data_joined, 100)$token))
+dtm1 <- TermDocumentMatrix(pop100)
+m1 <- as.matrix(dtm1)
+v1 <- sort(rowSums(m1),decreasing=TRUE)
+d1 <- data.frame(word = names(v1),freq=v1)
+
+words_collection <- unique(c(names(v), names(v1)))
+freq_pop <- rep(0, length(words_collection))
+freq_unpop <- rep(0, length(words_collection))
+
+for (i in 1:length(words_collection)){
+  freq_pop[i] <- v[words_collection[i]]
+  freq_unpop[i] <- v1[words_collection[i]]
+}
+freq_pop[is.na(freq_pop)] <- 0
+freq_unpop[is.na(freq_unpop)] <- 0
+popularity <- vector(length = length(words_collection))
+data_c1 <- data.frame(words_collection , 
+                     freq_pop, popularity)
+data_c1$popularity = 'popular movie'
+data_c2 <- data.frame(words_collection , 
+                      freq_unpop, popularity)
+data_c2$popularity = 'unpopular movie'
+colnames(data_c2)[colnames(data_c2) == 'freq_unpop'] <- 'freq_pop'
+data_c = bind_rows(data_c1, data_c2)
+data_c <- data_c[order(-freq_pop),]
+ggplot(data_c[1:20,],
+       aes(x = words_collection,
+           y = freq_pop,
+           fill = popularity)) +
+  geom_col() 
+```
+```{r}
+
+```
+```{r}
+
+
+```
+```{r}
+
+# Clean up movie IDs in meta data
+meta$tagged <- sub(".txt$", "", meta$tagged)
+
+# Merge meta data with script data
+data_joined <- left_join(grouped, meta, by = c("movie_id" = "tagged"))
+
+# Select top 100 successful and unsuccessful movies based on popularity/ratings
+top_100_successful <- head(data_joined[order(data_joined$popularity, decreasing = TRUE), ], 100)
+bottom_100_unsuccessful <- head(data_joined[order(data_joined$popularity), ], 100)
+
+# Create function to preprocess text data
+preprocess_text <- function(text) {
+  text <- tolower(text)
+  text <- removePunctuation(text)
+  text <- removeNumbers(text)
+  text <- removeWords(text, stopwords("en"))
+  return(text)
+}
+
+# Preprocess text data for successful and unsuccessful movies
+successful_corpus <- Corpus(VectorSource(top_100_successful$token))
+unsuccessful_corpus <- Corpus(VectorSource(bottom_100_unsuccessful$token))
+
+successful_corpus <- tm_map(successful_corpus, content_transformer(preprocess_text))
+unsuccessful_corpus <- tm_map(unsuccessful_corpus, content_transformer(preprocess_text))
+
+# Create Document Term Matrices (DTMs)
+successful_dtm <- DocumentTermMatrix(successful_corpus)
+unsuccessful_dtm <- DocumentTermMatrix(unsuccessful_corpus)
+
+# Convert DTMs to matrices
+successful_matrix <- as.matrix(successful_dtm)
+unsuccessful_matrix <- as.matrix(unsuccessful_dtm)
+
+# Get word frequencies
+successful_freq <- rowSums(successful_matrix)
+unsuccessful_freq <- rowSums(unsuccessful_matrix)
+
+# Create dataframes for successful and unsuccessful movies
+successful_df <- data.frame(word = names(successful_freq), freq = successful_freq)
+unsuccessful_df <- data.frame(word = names(unsuccessful_freq), freq = unsuccessful_freq)
+
+# Merge dataframes
+merged_df <- merge(successful_df, unsuccessful_df, by = "word", suffixes = c("_successful", "_unsuccessful"))
+
+# Filter top 10-20 words by highest frequency difference
+top_words <- merged_df[order(abs(merged_df$freq_successful - merged_df$freq_unsuccessful), decreasing = TRUE), ][1:20, ]
+
+# Calculate frequency difference
+top_words$diff <- top_words$freq_successful - top_words$freq_unsuccessful
+
+ggplot(top_words, aes(x = diff, y = reorder(word, diff), label = word)) +
+  geom_point(aes(color = ifelse(diff > 0, "Successful", "Unsuccessful")), size = 3) +
+  geom_segment(aes(xend = 0, yend = word), color = "grey") +
+  geom_text(hjust = ifelse(top_words$diff > 0, 0, 1.2), size = 3) +
+  labs(title = "Top Words Correlated with Movie Success", x = "Frequency Difference (Successful - Unsuccessful)", y = NULL, color = "Movie Success") +
+  scale_color_manual(values = c("Successful" = "blue", "Unsuccessful" = "red")) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8)) +
+  guides(color = guide_legend(title = NULL))
+```
+```{r}
+# Create separate data frames for popular and unpopular movies
+data_c <- mutate(data_c, freq_pop2 = freq_pop)
+popular_data <- data_c[data_c$popularity == 'popular movie', ]
+unpopular_data <- data_c[data_c$popularity == 'unpopular movie', ]
+
+if ("unpopular movie" %in% data_c$popularity) {
+  data_c$freq_pop2 <- ifelse(data_c$popularity == "unpopular movie", -data_c$freq_pop, data_c$freq_pop2)
+} else if ("popular movie" %in% data_c$popularity) {
+  data_c$freq_pop2 <- ifelse(data_c$popularity == "popular movie", data_c$freq_pop, data_c$freq_pop2)
+}
+
+# Plot for unpopular movies
+plot_popular <- ggplot(popular_data[1:20, ], aes(x = freq_pop, y = words_collection)) +
+  geom_col(fill = "green") +
+  labs(title = "Top 20 Word Frequencies of popular words in Popular Movies",
+       x = "Frequency",
+       y = "Word") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+plot_unpopular <- ggplot(unpopular_data[1:20, ], aes(x = freq_unpop, y = words_collection)) +
+  geom_col(fill = "red") +
+  labs(title = "Top 20 Word Frequencies of popular words in unPopular Movies",
+       x = "Frequency",
+       y = "Word") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+
+
+ggplot(data_c[1:20,],
+       aes(x = freq_pop2,
+           y = words_collection,
+           fill = popularity)) +
+  geom_col() 
+```
+
+
+##### d) Profanity
+
+Using this [list of profanities](https://www.cs.cmu.edu/~biglou/resources/bad-words.txt) calculate a profanity score for each movie, indicating how often these words were used in the script. Visualize the Top 10 movies with most profanity, and show how the use of profanity has changed over time (using the movie release date). 
+
+Overall, there don't appear to be many significant changes in the use of profanity over the last century, with trendlines displaying as stationary.
+
+Interestignly, however, ET appears to trump other movies with regards to the use of profane language.
+
+```{r}
+## Measuring how appearance of profane words change over time 
+#https://cran.r-project.org/web/packages/tidytext/vignettes/tidying_casting.html
+
+library(tidyverse)
+library(stringr)
+library(lubridate)
+
+# Step 1: Download the list of profanities
+profanity_url <- "https://www.cs.cmu.edu/~biglou/resources/bad-words.txt"
+profanity_list <- readLines(profanity_url)
+
+# Step 2: Preprocess the list and convert it into a vector of profanity words
+profanity_words <- tolower(profanity_list)
+
+# Step 3: Preprocess the movie scripts and count the occurrences of profanity words
+# Assuming you have a dataframe named 'data_joined' containing movie scripts and release dates
+
+# Function to count profanity words in a text
+count_profanity <- function(text) {
+  text <- tolower(text)
+  count <- str_count(text, paste0("\\b", profanity_words, "\\b", collapse = "|"))
+  return(sum(count))
+}
+
+# Apply the function to each movie script
+data_joined$profanity_count <- sapply(data_joined$token, count_profanity)
+
+# Step 4: Calculate the profanity score for each movie
+# Profanity score is the count of profanity words normalized by the length of the script
+data_joined$profanity_score <- data_joined$profanity_count / nchar(data_joined$token)
+
+# Step 5: Visualize the top 10 movies with the most profanity
+top_10_profanity <- data_joined %>%
+  arrange(desc(profanity_score)) %>%
+  head(10)
+
+# Plot the top 10 movies with the most profanity
+ggplot(top_10_profanity, aes(x = reorder(movie_id, profanity_score), y = profanity_score)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Top 10 Movies with the Most Profanity",
+       x = "Movie ID",
+       y = "Profanity Score") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Step 6: Visualize how the use of profanity has changed over time
+# Assuming 'release' column contains movie release dates
+
+# Extract year from release date
+data_joined$release_year <- data_joined$imdb_release_date
+
+# Plot profanity score over time
+ggplot(data_joined, aes(x = imdb_release_date, y = profanity_score)) +
+  geom_point(alpha = 0.5, color="blue") +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  labs(title = "Profanity Usage Over Time",
+       x = "Release Year",
+       y = "Profanity Score")
+
+
+
+
+```
+
+##### e) Simplicity is a Virtue
+
+Examine the impact of script simplicity on its success by calculating a readability score (Flesch Reading Ease, Flesch-Kincaid, or other measures) for the scripts. Analyze and visualize the relationship between the readability of the scripts and their IMDb vote average, providing commentary on your findings.
+
+Observing our readability scores, movies seem to follow a relatively stable static pattern of the time, with no clear pattern of change in readability scores throughout the decades. 
+```{r}
+library(stringi)
+library(quanteda)
+library(ggplot2)
+
+# Calculate Flesch readability score for each movie script
+data_joined$readability <- textstat_readability(data_joined$token,
+                                                measure = "Flesch")$Flesch
+
+# Create a scatter plot
+ggplot(data_joined, aes(x = readability, y = vote_average)) +
+  geom_point(color = "skyblue", alpha = 0.6) +  # Set point color and transparency
+  geom_smooth(method = "loess", se = FALSE, color = "red") +  # Add smooth line
+  labs(title = "Relationship Between Script Readability and IMDb Vote Average",
+       x = "Flesch Readability Score",
+       y = "IMDb Vote Average") +
+  theme_minimal() +  # Set minimal theme
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+
+```
+
+#### 2. Genres
+
+##### a) Defining words
+
+Identify and visualize the most defining words across different movie genres using the TF-IDF measure. Utilize the `genre` variable from the movie metadata to differentiate and analyze the unique lexical footprint of each genre. Provide a visualization to highlight how different genres are defined by different words. 
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tidytext)
+
+data2a <- select(data_joined,c(token, genres))
+data2a = data2a[complete.cases(data2a), ]
+
+
+data2a_words <- data2a %>%
+  mutate(token = as.character(token)) %>% 
+  unnest_tokens(output = word, input = token) %>%
+  count(genres, word, sort = TRUE)
+data2a_words  <- data2a_words  %>%
+  bind_tf_idf(term = word, document = genres, n)
+
+
+
+ data2a_words %>% group_by(genres) %>%
+   ungroup() %>%
+   top_n(30) %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = genres)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~genres, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+ 
+```
+
+##### b) Emotions
+
+Now, use the NRC Word-Emotion Association Lexicon in the `tidytext` package to identify a larger set of emotions (e.g. anger, anticipation, disgust, fear, joy, sadness, surprise, trust). Again, visualize the relationship between the use of words from these categories and the movie genre. What is your finding?
+```{r}
+library(tidytext)
+
+# Check data types and convert if needed
+data_joined$token <- as.character(data_joined$token)
+
+# Prepare the data
+emotion <- data_joined %>%
+  select(token, genres) %>%
+  drop_na() %>%
+  count(token, genres) %>%
+  bind_tf_idf(token, genres, n)
+
+# Tokenize the data and count word frequencies
+emotions_words <-emotion %>%
+  unnest_tokens(output = word, input = token) %>%
+  count(genres, word, sort = TRUE)
+
+# Associate words with emotions using NRC lexicon
+emotions <- get_sentiments("nrc")
+if (is.null(emotions)) {
+  stop("Error: NRC lexicon not available.")
+}
+
+emotions_words <- emotions_words %>%
+  group_by(genres) %>%
+  inner_join(emotions)
+
+# Calculate emotion sums for each genre
+emotion_sums <- emotions_words %>%
+  group_by(genres, sentiment) %>%
+  summarise(emotion_sums = sum(n)) %>%
+  ungroup()
+
+final= emotions_words %>%
+  group_by(genres, sentiment) %>%
+  summarise(emotion_sums=sum(n)) %>%
+  group_by(genres)%>%
+  ungroup()
+  
+ final%>% 
+  group_by(genres)%>%
+  ungroup() %>% top_n(40) %>%
+  ggplot(aes(x=reorder(sentiment,emotion_sums),y=emotion_sums,fill=genres)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~genres,scales="free") + 
+  coord_flip()
+
+
+```
+
+#### 3. Topic Modeling [**OPTIONAL ONLY**. Bonus points]
+```{r}
+library(topicmodels)
+library(tm)
+library(dplyr)
+library(forcats)
+library(ggplot2)
+
+
+data_subset <- data_joined %>%
+  select(token, imdb_release_date) %>%
+  filter(imdb_release_date == '1990') %>%
+  na.omit() 
+
+# Number of topics
+num_topics <- 5
+
+# Create Document-Term Matrix
+DTM <- DocumentTermMatrix(Corpus(VectorSource(data_subset$token)), 
+                          control = list(bounds = list(global = c(3, Inf))))
+
+
+
+# LDA model
+topicModel <- LDA(DTM, num_topics, method = "Gibbs", 
+                  control = list(iter = 500, verbose = 25))   
+
+# Extract top words for each topic
+top_words <- tidy(topicModel, matrix = "beta") %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  mutate(term = fct_reorder(term, beta))
+
+# Plotting
+ggplot(top_words, aes(term, beta, fill = as.factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  labs(title = "Top Words for Movies Released in 1990",
+       x = "Words",
+       y = "Probability") +
+  theme_minimal()
+
+
+data_subset <- data_joined %>%
+  select(token, imdb_release_date) %>%
+  filter(imdb_release_date == '1960') %>%
+  na.omit() 
+
+
+
+# Create Document-Term Matrix
+DTM <- DocumentTermMatrix(Corpus(VectorSource(data_subset$token)), 
+                          control = list(bounds = list(global = c(3, Inf))))
+
+set.seed(4)
+
+# LDA model
+topicModel <- LDA(DTM, num_topics, method = "Gibbs", 
+                  control = list(iter = 500, verbose = 25))   
+
+# Extract top words for each topic
+top_words <- tidy(topicModel, matrix = "beta") %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  mutate(term = fct_reorder(term, beta))
+
+# Plotting
+ggplot(top_words, aes(term, beta, fill = as.factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  labs(title = "Top Words for Movies Released in 1960",
+       x = "Words",
+       y = "Probability") +
+  theme_minimal()
+```
+
+Conduct a topic modeling analysis using LDA or STM on a manageable subset of the movie scripts. Create visualizations that illustrate the significant themes or topics uncovered in the analysis, and discuss the insights gained from the topic model.
+
+## Submission
+
+Please add the hash of your final commit in the feedback issue request to submit your homework. The homework is due on Monday, April 1 at noon.
+
+#### Academic Integrity
+
+Your submission should be your own original work. Inspiration and technique understanding from external sources are acceptable, but direct collaboration or copying is not permitted. Ensure your analysis and visualizations are uniquely crafted for this assignment.
